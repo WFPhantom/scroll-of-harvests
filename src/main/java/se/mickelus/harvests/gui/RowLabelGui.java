@@ -1,7 +1,6 @@
 package se.mickelus.harvests.gui;
 
 import com.google.common.collect.ImmutableList;
-import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.math.Axis;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.resources.language.I18n;
@@ -36,7 +35,7 @@ public class RowLabelGui extends GuiElement {
         graphics.pose().pushPose();
         graphics.pose().translate(refX + 3, refY, 0);
         graphics.pose().mulPose(Axis.ZP.rotationDegrees(-90.0F));
-        graphics.pose().translate(- (height + label.getWidth()) / 2, 0, 0);
+        graphics.pose().translate(- (height + label.getWidth()) / 2f, 0, 0);
         label.draw(graphics,  0, 0, screenWidth, screenHeight, mouseX, mouseY, opacity);
         graphics.pose().popPose();
 

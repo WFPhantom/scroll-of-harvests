@@ -2,6 +2,7 @@ package se.mickelus.harvests.filter;
 
 import com.google.gson.*;
 import net.minecraft.client.Minecraft;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.packs.resources.ReloadableResourceManager;
 import net.minecraft.server.packs.resources.Resource;
@@ -10,8 +11,7 @@ import net.minecraft.server.packs.resources.ResourceManagerReloadListener;
 import net.minecraft.util.GsonHelper;
 import net.minecraft.world.item.Tier;
 import net.minecraft.world.item.TieredItem;
-import net.minecraftforge.common.TierSortingRegistry;
-import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraft.world.item.crafting.Ingredient;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import se.mickelus.harvests.HarvestsMod;
@@ -21,8 +21,6 @@ import se.mickelus.mutil.util.JsonOptional;
 import javax.annotation.Nullable;
 import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
 import java.util.Collection;
 import java.util.Objects;
 import java.util.Optional;
@@ -59,11 +57,11 @@ public class TierFilterStore implements ResourceManagerReloadListener {
     private void prepareFilters() {
         ResourceManager resourceManager = Minecraft.getInstance().getResourceManager();
         filters = Stream.concat(
-                        resourceManager.listResources("filters", rl -> rl.getPath().endsWith(".json")).entrySet().stream()
-                                .filter(entry -> HarvestsMod.modId.equals(entry.getKey().getNamespace()))
-                                .map(entry -> parseFilter(entry.getKey(), entry.getValue()))
-                                .filter(Objects::nonNull),
-                        TierFilter.getFilters().stream())
+                resourceManager.listResources("filters", rl -> rl.getPath().endsWith(".json")).entrySet().stream()
+                        .filter(entry -> HarvestsMod.modId.equals(entry.getKey().getNamespace()))
+                        .map(entry -> parseFilter(entry.getKey(), entry.getValue()))
+                        .filter(Objects::nonNull),
+                TierFilter.getFilters().stream())
                 .toArray(TierFilter[]::new);
 
         if (filters.length == 0) {
@@ -127,7 +125,7 @@ public class TierFilterStore implements ResourceManagerReloadListener {
                 .map(array -> StreamSupport.stream(array.spliterator(), false))
                 .orElseGet(Stream::empty)
                 .map(JsonElement::getAsString)
-                .map(ResourceLocation::new)
+                .map(ResourceLocation::parse)
                 .collect(Collectors.toSet());
 
         Collection<ResourceLocation> rejectList = JsonOptional.field(json, "reject")
@@ -135,20 +133,33 @@ public class TierFilterStore implements ResourceManagerReloadListener {
                 .map(array -> StreamSupport.stream(array.spliterator(), false))
                 .orElseGet(Stream::empty)
                 .map(JsonElement::getAsString)
-                .map(ResourceLocation::new)
+                .map(ResourceLocation::parse)
                 .collect(Collectors.toSet());
 
         return tier -> {
-            ResourceLocation rl = TierSortingRegistry.getName(tier);
+            ResourceLocation rl = Optional.ofNullable(tier.getRepairIngredient())
+                    .map(Ingredient::getItems)
+                    .filter(items -> items.length > 0)
+                    .map(items -> BuiltInRegistries.ITEM.getKey(items[0].getItem()))
+                    .orElse(null);
 
             if (requireTools && !getTiersWithTools().contains(tier)) {
                 return false;
             }
 
-            if (requireBlocks && (tier.getTag() == null
-                    || !ForgeRegistries.BLOCKS.tags().isKnownTagName(tier.getTag())
-                    || ForgeRegistries.BLOCKS.tags().getTag(tier.getTag()).isEmpty())) {
-                return false;
+            if (requireBlocks) {
+                boolean hasBlocks = getTiersWithTools().contains(tier) &&
+                        BuiltInRegistries.ITEM.stream()
+                                .filter(item -> item instanceof TieredItem)
+                                .map(item -> (TieredItem) item)
+                                .filter(item -> tier.equals(item.getTier()))
+                                .findFirst()
+                                .map(item -> item.getDefaultInstance()
+                                        .getOrDefault(net.minecraft.core.component.DataComponents.TOOL, null))
+                                .map(tool -> tool.rules().stream()
+                                        .anyMatch(rule -> rule.speed().isPresent()))
+                                .orElse(false);
+                if (!hasBlocks) return false;
             }
 
             if (requireRepairs && (tier.getRepairIngredient() == null || tier.getRepairIngredient().isEmpty())) {
@@ -173,7 +184,7 @@ public class TierFilterStore implements ResourceManagerReloadListener {
 
     private Collection<Tier> getTiersWithTools() {
         if (tiersWithTools == null) {
-            tiersWithTools = ForgeRegistries.ITEMS.getValues().stream()
+            tiersWithTools = BuiltInRegistries.ITEM.stream()
                     .filter(item -> item instanceof TieredItem)
                     .map(item -> (TieredItem) item)
                     .map(TieredItem::getTier)

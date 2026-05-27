@@ -5,6 +5,8 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.resources.language.I18n;
+import net.minecraft.core.Holder;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
@@ -13,23 +15,23 @@ import net.minecraft.world.item.Tier;
 import net.minecraft.world.item.TieredItem;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.level.block.Block;
-import net.minecraftforge.common.TierSortingRegistry;
-import net.minecraftforge.registries.ForgeRegistries;
-import net.minecraftforge.registries.tags.ITag;
 import org.apache.commons.lang3.StringUtils;
 import se.mickelus.harvests.HarvestsMod;
 import se.mickelus.mutil.gui.*;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 
 public class TierGui extends GuiElement {
-    private static final ResourceLocation texture = new ResourceLocation(HarvestsMod.modId, "textures/gui/scroll.png");
+    private static final ResourceLocation texture = ResourceLocation.fromNamespaceAndPath(HarvestsMod.modId, "textures/gui/scroll.png");
     private final GuiString nameElement;
     private final List<Component> nameTooltip;
 
-    public TierGui(int x, int y, Tier tier, int index, List<TieredItem> tieredItems) {
+    public TierGui(int x, int y, Tier tier, int index, List<TieredItem> tieredItems, List<Tier> sortedTiers) {
         super(x, y, 64, 142);
 
         Font font = Minecraft.getInstance().font;
@@ -54,8 +56,16 @@ public class TierGui extends GuiElement {
                 .ifPresent(this::addChild);
 
 
-        ResourceLocation tierIdentifier = TierSortingRegistry.getName(tier);
-        String tierName = font.plainSubstrByWidth(StringUtils.capitalize(tierIdentifier.getPath().replace("_", " ")), 60);
+        ResourceLocation tierIdentifier = Optional.ofNullable(tier.getRepairIngredient())
+                .map(Ingredient::getItems)
+                .filter(items -> items.length > 0)
+                .map(items -> BuiltInRegistries.ITEM.getKey(items[0].getItem()))
+                .orElse(ResourceLocation.fromNamespaceAndPath(HarvestsMod.modId, "unknown"));
+        String tierName = font.plainSubstrByWidth(
+                StringUtils.capitalize(tier.getIncorrectBlocksForDrops().location().getPath()
+                        .replace("incorrect_for_", "")
+                        .replace("_tool", "")
+                        .replace("_", " ")), 60);
         nameElement = new GuiString(0, 7, tierName, 0);
         nameElement.setShadow(false);
         nameElement.setAttachment(GuiAttachment.topCenter);
@@ -80,7 +90,7 @@ public class TierGui extends GuiElement {
 
         List<TieredItem> applicableTools = tieredItems.stream()
                 .filter(item -> tier.equals(item.getTier()))
-                .collect(Collectors.toList());
+                .toList();
         boolean toolOverflow = applicableTools.size() > 6;
         int toolCount = Math.min(toolOverflow ? 5 : 6, applicableTools.size());
 
@@ -100,13 +110,20 @@ public class TierGui extends GuiElement {
 
             addChild(new OverflowCounterGui(43, 74, overflowToolNames));
         }
+        int tierIndex = sortedTiers.indexOf(tier);
+        Set<Block> incorrectForThis = StreamSupport.stream(
+                        BuiltInRegistries.BLOCK.getTagOrEmpty(tier.getIncorrectBlocksForDrops()).spliterator(), false)
+                .map(Holder::value).collect(Collectors.toSet());
 
-        List<Block> applicableBlocks = Optional.ofNullable(tier.getTag())
-                .filter(ForgeRegistries.BLOCKS.tags()::isKnownTagName)
-                .map(ForgeRegistries.BLOCKS.tags()::getTag)
-                .stream()
-                .flatMap(ITag::stream)
-                .collect(Collectors.toList());
+        Set<Block> incorrectForPrevious = tierIndex > 0
+                ? StreamSupport.stream(
+                        BuiltInRegistries.BLOCK.getTagOrEmpty(sortedTiers.get(tierIndex - 1).getIncorrectBlocksForDrops()).spliterator(), false)
+                .map(Holder::value).collect(Collectors.toSet())
+                : Collections.emptySet();
+
+        List<Block> applicableBlocks = incorrectForPrevious.stream()
+                .filter(block -> !incorrectForThis.contains(block))
+                .toList();
         boolean blockOverflow = applicableBlocks.size() > 6;
         int blockCount = Math.min(blockOverflow ? 5 : 6, applicableBlocks.size());
 

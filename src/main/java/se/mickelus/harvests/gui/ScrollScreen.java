@@ -1,24 +1,22 @@
 package se.mickelus.harvests.gui;
 
 import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.ImageButton;
 import net.minecraft.client.gui.components.Tooltip;
+import net.minecraft.client.gui.components.WidgetSprites;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Tier;
 import net.minecraft.world.item.TieredItem;
-import net.minecraftforge.client.event.ScreenEvent;
-import net.minecraftforge.common.TierSortingRegistry;
-import net.minecraftforge.eventbus.api.EventPriority;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.registries.ForgeRegistries;
-import se.mickelus.harvests.ConfigHandler;
+import net.neoforged.bus.api.EventPriority;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.neoforge.client.event.ScreenEvent;
+import se.mickelus.harvests.Config;
 import se.mickelus.harvests.HarvestsMod;
 import se.mickelus.harvests.api.TierFilter;
 import se.mickelus.harvests.filter.TierFilterStore;
@@ -28,14 +26,18 @@ import se.mickelus.mutil.gui.impl.GuiHorizontalLayoutGroup;
 import se.mickelus.mutil.gui.impl.GuiHorizontalScrollable;
 
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
-import java.util.function.Consumer;
 import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 
 public class ScrollScreen extends Screen {
-    private static final ResourceLocation scrollButtonTexture = new ResourceLocation(HarvestsMod.modId, "textures/gui/scroll_button.png");
-    private static final ResourceLocation scrollTexture = new ResourceLocation(HarvestsMod.modId, "textures/gui/scroll.png");
+    private static final WidgetSprites SCROLL_BUTTON_SPRITE = new WidgetSprites(
+            ResourceLocation.fromNamespaceAndPath(HarvestsMod.modId, "scroll_button"),
+            ResourceLocation.fromNamespaceAndPath(HarvestsMod.modId, "scroll_button_active")
+    );
+    private static final ResourceLocation scrollTexture = ResourceLocation.fromNamespaceAndPath(HarvestsMod.modId, "textures/gui/scroll.png");
     private static TierFilter filter;
     private static double scrollOffset;
     private GuiElement defaultGui;
@@ -53,13 +55,14 @@ public class ScrollScreen extends Screen {
     public static void onScreenInit(ScreenEvent.Init.Post event) {
         if (event.getScreen() instanceof InventoryScreen screen) {
             Component tooltip = Component.translatable("harvests.scroll_button.tooltip");
-            ImageButton button = new ImageButton(screen.getGuiLeft() + ConfigHandler.client.buttonX.get(),
-                    screen.getGuiTop() + ConfigHandler.client.buttonY.get(), 18, 18, 0,
-                    0, 19, scrollButtonTexture, 256, 256,
-                    _button -> Minecraft.getInstance().setScreen(new ScrollScreen()),
-                    tooltip);
+            ImageButton button = new ImageButton(
+                    screen.getGuiLeft() + Config.BUTTON_X.get(),
+                    screen.getGuiTop() + Config.BUTTON_Y.get(),
+                    18, 18,
+                    SCROLL_BUTTON_SPRITE,
+                    _button -> Minecraft.getInstance().setScreen(new ScrollScreen())
+            );
             button.setTooltip(Tooltip.create(tooltip));
-
             event.addListener(button);
         }
     }
@@ -123,19 +126,24 @@ public class ScrollScreen extends Screen {
     }
 
     private void setupTiers() {
-        List<TieredItem> tieredItems = ForgeRegistries.ITEMS.getValues().stream()
+        List<TieredItem> tieredItems = BuiltInRegistries.ITEM.stream()
                 .filter(item -> item instanceof TieredItem)
                 .map(item -> (TieredItem) item)
                 .collect(Collectors.toList());
 
         tierGroup.clearChildren();
-        Tier[] tiers = TierSortingRegistry.getSortedTiers().stream()
+        List<Tier> sortedTiers = tieredItems.stream()
+                .map(TieredItem::getTier)
+                .distinct()
+                .sorted(Comparator.comparingInt((Tier t) -> (int) StreamSupport.stream(
+                                BuiltInRegistries.BLOCK.getTagOrEmpty(t.getIncorrectBlocksForDrops()).spliterator(), false)
+                        .count()).reversed())
                 .filter(tier -> filter.predicate.test(tier))
-                .toArray(Tier[]::new);
+                .collect(Collectors.toList());
 
-        for (int i = 0; i < tiers.length; i++) {
-            int index = filter.collapseLevels ? i : TierSortingRegistry.getTiersLowerThan(tiers[i]).size();
-            tierGroup.addChild(new TierGui(0, 0, tiers[i], index, tieredItems));
+        for (int i = 0; i < sortedTiers.size(); i++) {
+            Tier tier = sortedTiers.get(i);
+            tierGroup.addChild(new TierGui(0, 0, tier, i, tieredItems, sortedTiers));
         }
         scrollArea.markDirty();
     }
@@ -160,7 +168,7 @@ public class ScrollScreen extends Screen {
 
     @Override
     public void render(final GuiGraphics graphics, final int mouseX, final int mouseY, final float partialTick) {
-        renderBackground(graphics);
+        renderBackground(graphics, mouseX, mouseY, partialTick);
         super.render(graphics, mouseX, mouseY, partialTick);
 
         defaultGui.updateFocusState((width - defaultGui.getWidth()) / 2, (height - defaultGui.getHeight()) / 2, mouseX, mouseY);
@@ -178,6 +186,7 @@ public class ScrollScreen extends Screen {
         if (tooltipLines != null) {
             graphics.renderTooltip(getMinecraft().font, tooltipLines, Optional.empty(), mouseX, mouseY);
         }
+        graphics.pose().popPose();
     }
 
     @Override
@@ -188,14 +197,12 @@ public class ScrollScreen extends Screen {
 
         return super.mouseClicked(x, y, button);
     }
-
     @Override
-    public boolean mouseScrolled(double mouseX, double mouseY, double distance) {
-        if (defaultGui.onMouseScroll(mouseX, mouseY, distance)) {
+    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+        if (defaultGui.onMouseScroll(mouseX, mouseY, scrollY)) {
             return true;
         }
-
-        return super.mouseScrolled(mouseX, mouseY, distance);
+        return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
     }
 
     @Override
@@ -218,10 +225,6 @@ public class ScrollScreen extends Screen {
 
     @Override
     public boolean charTyped(char typedChar, int keyCode) {
-        if (defaultGui.onCharType(typedChar, keyCode)) {
-            return true;
-        }
-
-        return false;
+        return defaultGui.onCharType(typedChar, keyCode);
     }
 }

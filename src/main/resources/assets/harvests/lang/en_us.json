@@ -115,5 +115,12 @@
     "harvests.tier.97": "XCXVII",
     "harvests.tier.98": "XCXVIII",
     "harvests.tier.99": "XCXIX",
-    "harvests.tier.100": "C"
+    "harvests.tier.100": "C",
+    "harvests.configuration.button_x": "Button X",
+    "harvests.configuration.button_y": "Button Y",
+    "harvests.configuration.title": "Scroll of Harvests Configuration",
+    "harvests.configuration.section.harvests.client.toml": "Client Settings",
+    "harvests.configuration.section.harvests.client.toml.title": "Client Settings",
+    "harvests.configuration.button_x.tooltip": "Horizontal positioning for the scroll button in the player inventory",
+    "harvests.configuration.button_y.tooltip": "Vertical positioning for the scroll button in the player inventory"
 }
